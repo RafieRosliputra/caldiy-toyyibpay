@@ -1,3 +1,4 @@
+import { getPaymentCurrency } from "@calcom/app-store/_utils/payments/getPaymentCurrency";
 import { APP_NAME } from "@calcom/lib/constants";
 import logger from "@calcom/lib/logger";
 import prisma from "@calcom/prisma";
@@ -141,7 +142,7 @@ const getData = withAppDirSsr<PaymentPageProps>(async (context) => {
         title: eventType.title,
         length: eventType.length,
         price: eventType.price,
-        currency: eventType.currency,
+        currency: getPaymentCurrency(eventType),
         // `getPaymentAppData()` parses this with a Zod schema, which throws on `null`. Event types created
         // before metadata existed can have `metadata: null`, so fall back to an empty object.
         metadata: (eventType.metadata ?? {}) as unknown as Record<string, unknown>,
