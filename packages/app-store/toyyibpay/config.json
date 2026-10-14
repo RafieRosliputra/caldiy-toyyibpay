@@ -1,0 +1,17 @@
+{
+  "/*": "Don't modify slug - If required, do it using cli edit command",
+  "name": "ToyyibPay",
+  "slug": "toyyibpay",
+  "type": "toyyibpay_payment",
+  "logo": "icon.svg",
+  "url": "https://toyyibpay.com",
+  "variant": "payment",
+  "categories": ["payment"],
+  "publisher": "Community",
+  "email": "support@toyyibpay.com",
+  "description": "Accept Malaysian payments (FPX online banking, credit/debit cards and DuitNow QR) for paid bookings via ToyyibPay. Customers are redirected to a ToyyibPay bill and the booking is confirmed automatically once the payment callback is verified.",
+  "extendsFeature": "EventType",
+  "isTemplate": false,
+  "__createdUsingCli": true,
+  "__template": "event-type-app-card"
+}

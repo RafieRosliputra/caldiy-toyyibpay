@@ -1,0 +1,87 @@
+name: "Build Cal.diy + ToyyibPay image"
+
+# Builds the Cal.diy web image from this fork (includes packages/app-store/toyyibpay) and pushes it to GHCR.
+# The image is built with placeholder URLs; the real domain is injected at container start by scripts/start.sh
+# through NEXT_PUBLIC_WEBAPP_URL / NEXT_PUBLIC_WEBSITE_URL (see Dockerfile + replace-placeholder.sh).
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  POSTGRES_USER: unicorn_user
+  POSTGRES_PASSWORD: magical_password
+  POSTGRES_DB: calendso
+
+jobs:
+  build:
+    name: Build and push to GHCR
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The Next.js production build queries the database, so a throwaway Postgres is started the same way
+      # upstream does it (see .github/actions/docker-build-and-test).
+      - name: Start build-time Postgres
+        run: docker compose up -d database
+
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 40); do
+            if docker exec database pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1; then
+              echo "Postgres is ready"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "Postgres did not become ready in time"
+          docker compose logs database
+          exit 1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            network=container:database
+          buildkitd-flags: |
+            --allow-insecure-entitlement security.insecure --allow-insecure-entitlement network.host
+
+      - name: Compute lowercase image name
+        id: image
+        run: echo "name=ghcr.io/$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ./
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ${{ steps.image.outputs.name }}:latest
+            ${{ steps.image.outputs.name }}:${{ github.sha }}
+          build-args: |
+            NEXT_PUBLIC_WEBAPP_URL=http://localhost:3000
+            NEXT_PUBLIC_WEBSITE_URL=http://localhost:3000
+            NEXT_PUBLIC_API_V2_URL=http://localhost:5555/api/v2
+            NEXT_PUBLIC_LICENSE_CONSENT=agree
+            DATABASE_URL=postgresql://unicorn_user:magical_password@localhost:5432/calendso
+            DATABASE_DIRECT_URL=postgresql://unicorn_user:magical_password@localhost:5432/calendso
+            MAX_OLD_SPACE_SIZE=6144
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

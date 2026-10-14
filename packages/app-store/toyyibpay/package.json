@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "private": true,
+  "license": "MIT",
+  "name": "@calcom/toyyibpay",
+  "version": "0.0.0",
+  "main": "./index.ts",
+  "description": "ToyyibPay payment app for Cal.com/Cal.diy - FPX, credit card and DuitNow QR payments for paid bookings in Malaysia.",
+  "dependencies": {
+    "@calcom/dayjs": "workspace:*",
+    "@calcom/features": "workspace:*",
+    "@calcom/lib": "workspace:*",
+    "@calcom/prisma": "workspace:*",
+    "@calcom/ui": "workspace:*"
+  },
+  "devDependencies": {
+    "@calcom/types": "workspace:*"
+  }
+}
