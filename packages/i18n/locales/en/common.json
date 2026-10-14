@@ -447,6 +447,8 @@
   "when": "When",
   "where": "Where",
   "add_to_calendar": "Add to calendar",
+  "add_to_google_calendar": "Add to Google Calendar",
+  "add_to_apple_calendar": "Add to Apple Calendar",
   "add_to_calendar_description": "Select where to add events when you're booked.",
   "add_events_to": "Add events to",
   "default_reminder": "Default reminder",
