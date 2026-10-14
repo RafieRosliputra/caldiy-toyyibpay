@@ -18,7 +18,22 @@ export const TOYYIBPAY_PAYMENT_CHANNELS = {
 } as const;
 
 /**
- * How long we hold a slot while the booker is paying. The ToyyibPay bill expires at the same time,
- * and the awaiting-payment email is scheduled with the same delay (`AWAITING_PAYMENT_EMAIL_DELAY_MINUTES`).
+ * How long we hold a slot while the booker is paying.
+ *
+ * `AWAITING_PAYMENT_EMAIL_DELAY_MINUTES` (default 15) is when the reminder email is sent, while
+ * `AWAITING_PAYMENT_EXPIRE_MINUTES` (default 30) is when the slot is released and the bill is deactivated.
+ * The hold must be longer than the reminder, otherwise the reminder arrives exactly as the slot is freed.
  */
+export const DEFAULT_PAYMENT_REMINDER_MINUTES = 5;
 export const DEFAULT_PAYMENT_HOLD_MINUTES = 15;
+
+export function getPaymentReminderMinutes(): number {
+  return Number(process.env.AWAITING_PAYMENT_EMAIL_DELAY_MINUTES) || DEFAULT_PAYMENT_REMINDER_MINUTES;
+}
+
+export function getPaymentHoldMinutes(): number {
+  return Number(process.env.AWAITING_PAYMENT_EXPIRE_MINUTES) || DEFAULT_PAYMENT_HOLD_MINUTES;
+}
+
+/** ToyyibPay rejects bills of RM1.00 or less ("billAmount should more than 1.00"). */
+export const TOYYIBPAY_MIN_BILL_AMOUNT_SEN = 100;

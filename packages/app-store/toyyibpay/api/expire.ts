@@ -7,7 +7,7 @@ import prisma from "@calcom/prisma";
 import type { Prisma } from "@calcom/prisma/client";
 import type { NextApiRequest, NextApiResponse } from "next";
 import appConfig from "../config.json";
-import { DEFAULT_PAYMENT_HOLD_MINUTES } from "../lib/constants";
+import { getPaymentHoldMinutes } from "../lib/constants";
 import { deactivateToyyibpayBill, getToyyibpayBillTransactions } from "../lib/toyyibpayClient";
 import { toyyibpayCredentialKeysSchema } from "../lib/toyyibpayCredentialKeysSchema";
 import { toyyibpayPaymentDataSchema } from "../lib/toyyibpayPaymentDataSchema";
@@ -31,8 +31,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(401).json({ message: "Unauthorized" });
   }
 
-  const holdMinutes =
-    Number(process.env.AWAITING_PAYMENT_EMAIL_DELAY_MINUTES) || DEFAULT_PAYMENT_HOLD_MINUTES;
+  const holdMinutes = getPaymentHoldMinutes();
   const cutoff = new Date(Date.now() - holdMinutes * 60_000);
 
   const payments = await prisma.payment.findMany({
@@ -131,6 +130,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     log.info(`Released slot for booking ${payment.bookingId} (ToyyibPay payment ${payment.id} expired)`);
     expired++;
+  }
+
+  if (payments.length > 0) {
+    log.info(
+      `Expiration run (hold ${holdMinutes}m): ${payments.length} unpaid payment(s) checked, ${expired} expired, ${recovered} recovered`
+    );
   }
 
   return res.status(200).json({ success: true, checked: payments.length, expired, recovered });

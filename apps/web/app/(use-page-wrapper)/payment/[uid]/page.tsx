@@ -1,10 +1,14 @@
 import { APP_NAME } from "@calcom/lib/constants";
+import logger from "@calcom/lib/logger";
+import prisma from "@calcom/prisma";
 import { buildLegacyCtx } from "@lib/buildLegacyCtx";
 import type { PageProps } from "app/_types";
 import { _generateMetadata } from "app/_utils";
 import { withAppDirSsr } from "app/WithAppDirSsr";
 import { cookies, headers } from "next/headers";
 import PaymentPage from "./PaymentPage";
+
+const log = logger.getSubLogger({ prefix: ["payment-page"] });
 
 type PaymentPageProps = {
   payment: {
@@ -44,6 +48,116 @@ type PaymentPageProps = {
   user?: { name?: string | null; username?: string | null } | null;
 };
 
+/**
+ * Loads the payment (and its booking + event type) that the booker is asked to pay for.
+ *
+ * The community edition has no payment data loader of its own, so this is implemented here: without it the
+ * page rendered with empty props and `getPaymentAppData()` threw while parsing a `null` metadata object,
+ * which surfaced as the generic "It's not you, it's us" error page.
+ */
+const getData = withAppDirSsr<PaymentPageProps>(async (context) => {
+  const uidParam = context.query?.uid;
+  const uid = Array.isArray(uidParam) ? uidParam[0] : uidParam;
+
+  if (!uid) return { notFound: true } as const;
+
+  const payment = await prisma.payment.findFirst({
+    where: { uid },
+    select: {
+      id: true,
+      success: true,
+      refunded: true,
+      amount: true,
+      currency: true,
+      paymentOption: true,
+      data: true,
+      appId: true,
+      booking: {
+        select: {
+          id: true,
+          uid: true,
+          title: true,
+          description: true,
+          startTime: true,
+          endTime: true,
+          status: true,
+          paid: true,
+          location: true,
+          eventType: {
+            select: {
+              id: true,
+              title: true,
+              length: true,
+              price: true,
+              currency: true,
+              metadata: true,
+              successRedirectUrl: true,
+              forwardParamsSuccessRedirect: true,
+              recurringEvent: true,
+              owner: { select: { name: true, username: true, theme: true, hideBranding: true } },
+              team: { select: { hideBranding: true } },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  const booking = payment?.booking;
+  const eventType = booking?.eventType;
+
+  if (!booking || !eventType) {
+    log.warn(`Payment ${uid} not found, or its booking has no event type`);
+    return { notFound: true } as const;
+  }
+
+  const owner = eventType.owner;
+
+  return {
+    props: {
+      payment: {
+        id: payment.id,
+        success: payment.success,
+        refunded: payment.refunded,
+        amount: payment.amount,
+        currency: payment.currency,
+        paymentOption: payment.paymentOption,
+        appId: payment.appId,
+        data: (payment.data ?? {}) as unknown as Record<string, unknown>,
+      },
+      booking: {
+        id: booking.id,
+        uid: booking.uid,
+        title: booking.title,
+        description: booking.description,
+        startTime: booking.startTime.toISOString(),
+        endTime: booking.endTime.toISOString(),
+        status: booking.status,
+        paid: booking.paid,
+        location: booking.location,
+      },
+      eventType: {
+        id: eventType.id,
+        title: eventType.title,
+        length: eventType.length,
+        price: eventType.price,
+        currency: eventType.currency,
+        // `getPaymentAppData()` parses this with a Zod schema, which throws on `null`. Event types created
+        // before metadata existed can have `metadata: null`, so fall back to an empty object.
+        metadata: (eventType.metadata ?? {}) as unknown as Record<string, unknown>,
+        successRedirectUrl: eventType.successRedirectUrl,
+        forwardParamsSuccessRedirect: eventType.forwardParamsSuccessRedirect,
+        recurringEvent: eventType.recurringEvent ?? null,
+      },
+      profile: {
+        theme: owner?.theme ?? null,
+        hideBranding: eventType.team?.hideBranding ?? owner?.hideBranding ?? false,
+      },
+      user: owner ? { name: owner.name, username: owner.username } : null,
+    },
+  };
+});
+
 export const generateMetadata = async ({ params, searchParams }: PageProps) => {
   const props = await getData(
     buildLegacyCtx(await headers(), await cookies(), await params, await searchParams)
@@ -57,33 +171,6 @@ export const generateMetadata = async ({ params, searchParams }: PageProps) => {
     `/payment/${(await params).uid}`
   );
 };
-
-const getData = withAppDirSsr<PaymentPageProps>(async () => ({
-  props: {
-    payment: {
-      id: 0,
-      success: false,
-      refunded: false,
-      amount: 0,
-      currency: "usd",
-      paymentOption: null,
-      data: {},
-      appId: null,
-    },
-    booking: {
-      id: 0,
-      uid: "",
-      title: "",
-      startTime: "",
-      endTime: "",
-      status: "",
-      paid: false,
-      location: null,
-    },
-    eventType: { id: 0, title: "", length: 0, price: 0, currency: "usd", metadata: null },
-    profile: { theme: null, hideBranding: false },
-  },
-}));
 
 const ServerPage = async ({ params, searchParams }: PageProps) => {
   const props = await getData(

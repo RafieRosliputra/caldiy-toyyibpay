@@ -148,7 +148,7 @@ async function callToyyibpayApi(
 function parseToyyibpayResponse<T>(endpoint: string, body: string): T {
   const trimmed = body.trim();
   try {
-    const parsed = JSON.parse(trimmed) as T | { status?: string; msg?: string };
+    const parsed = JSON.parse(trimmed) as T | { status?: string; msg?: string; message?: string };
     if (
       parsed &&
       typeof parsed === "object" &&
@@ -156,9 +156,11 @@ function parseToyyibpayResponse<T>(endpoint: string, body: string): T {
       "status" in parsed &&
       parsed.status === "error"
     ) {
+      // Some endpoints answer with `msg`, others (e.g. checkDuitNowQRStatus) with `message`.
+      const parsedError = parsed as { msg?: string; message?: string };
       throw new ErrorWithCode(
         ErrorCode.PaymentCreationFailure,
-        `ToyyibPay ${endpoint} error: ${(parsed as { msg?: string }).msg ?? "unknown error"}`
+        `ToyyibPay ${endpoint} error: ${parsedError.msg ?? parsedError.message ?? "unknown error"}`
       );
     }
     return parsed as T;

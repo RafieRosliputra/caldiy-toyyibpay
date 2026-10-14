@@ -13,7 +13,12 @@ import type { CalendarEvent } from "@calcom/types/Calendar";
 import type { IAbstractPaymentService } from "@calcom/types/PaymentService";
 import { v4 as uuidv4 } from "uuid";
 import appConfig from "../config.json";
-import { DEFAULT_PAYMENT_HOLD_MINUTES, TOYYIBPAY_SUPPORTED_CURRENCY } from "./constants";
+import {
+  getPaymentHoldMinutes,
+  getPaymentReminderMinutes,
+  TOYYIBPAY_MIN_BILL_AMOUNT_SEN,
+  TOYYIBPAY_SUPPORTED_CURRENCY,
+} from "./constants";
 import {
   createToyyibpayBill,
   formatToyyibpayExpiryDate,
@@ -107,15 +112,16 @@ class ToyyibpayPaymentService implements IAbstractPaymentService {
       }
 
       const billAmount = Math.round(payment.amount);
-      if (billAmount <= 0) {
+      if (billAmount <= TOYYIBPAY_MIN_BILL_AMOUNT_SEN) {
         throw new ErrorWithCode(
           ErrorCode.PaymentCreationFailure,
-          "ToyyibPay bill amount must be greater than 0"
+          `ToyyibPay requires a bill amount above RM1.00, but this booking is RM${(billAmount / 100).toFixed(
+            2
+          )}. Increase the price of this event type.`
         );
       }
 
-      const holdMinutes =
-        Number(process.env.AWAITING_PAYMENT_EMAIL_DELAY_MINUTES) || DEFAULT_PAYMENT_HOLD_MINUTES;
+      const holdMinutes = getPaymentHoldMinutes();
       const billExpiryDate = formatToyyibpayExpiryDate(dayjs().add(holdMinutes, "minutes").toDate());
 
       const reference = uuidv4();
@@ -255,8 +261,7 @@ class ToyyibpayPaymentService implements IAbstractPaymentService {
     paymentData: Payment,
     _eventTypeMetadata?: EventTypeMetadata
   ): Promise<void> {
-    const delayMinutes =
-      Number(process.env.AWAITING_PAYMENT_EMAIL_DELAY_MINUTES) || DEFAULT_PAYMENT_HOLD_MINUTES;
+    const delayMinutes = getPaymentReminderMinutes();
     const scheduledEmailAt = dayjs().add(delayMinutes, "minutes").toDate();
 
     try {

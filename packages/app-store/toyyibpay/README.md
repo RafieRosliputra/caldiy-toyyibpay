@@ -47,14 +47,18 @@ Credentials are stored per user/team, not in env. The only optional env override
 | --- | --- | --- |
 | `TOYYIBPAY_API_PRODUCTION` | `https://toyyibpay.com` | Production API base URL |
 | `TOYYIBPAY_API_SANDBOX` | `https://dev.toyyibpay.com` | Sandbox API base URL |
-| `AWAITING_PAYMENT_EMAIL_DELAY_MINUTES` | `15` | Slot hold / bill expiry in minutes (shared with Stripe) |
+| `AWAITING_PAYMENT_EMAIL_DELAY_MINUTES` | `5` | Minutes after booking when the "awaiting payment" reminder is sent |
+| `AWAITING_PAYMENT_EXPIRE_MINUTES` | `15` | How long the slot is held and the bill stays payable |
 
 ## Behaviour notes
 
 - **MYR only.** ToyyibPay settles in Malaysian Ringgit, so the event type price must be in MYR.
-- **Minimum amount.** ToyyibPay rejects bills below RM1.00 in practice - set prices accordingly.
-- **Slot hold.** The bill expiry and the booking hold both use `AWAITING_PAYMENT_EMAIL_DELAY_MINUTES`.
-  When the hold elapses the booker gets the "awaiting payment" email and the slot becomes bookable again.
+- **Minimum amount.** ToyyibPay rejects amounts of RM1.00 or less; the app refuses the booking before calling the
+  API when the price is too low.
+- **Slot hold.** The slot is held for `AWAITING_PAYMENT_EXPIRE_MINUTES` (default 15) and the bill expires at the
+  same time. The reminder email is sent earlier (`AWAITING_PAYMENT_EMAIL_DELAY_MINUTES`, default 5) so it is still
+  actionable. When the hold elapses, `/api/integrations/toyyibpay/expire` deactivates the bill and cancels the
+  booking, freeing the slot.
 - **No refund API.** ToyyibPay has no refund endpoint; `refund()` throws and asks you to deactivate the bill
   (`inactiveBill`) and refund manually from the ToyyibPay dashboard.
 - **DuitNow QR** has to be activated on the ToyyibPay account before it can be enabled here, otherwise
