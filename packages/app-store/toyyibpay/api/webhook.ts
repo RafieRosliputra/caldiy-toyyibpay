@@ -8,11 +8,31 @@ import { distributedTracing } from "@calcom/lib/tracing/factory";
 import prisma from "@calcom/prisma";
 import type { NextApiRequest, NextApiResponse } from "next";
 import appConfig from "../config.json";
+import { parseCallbackBody } from "../lib/parseCallbackBody";
 import { verifyToyyibpayCallbackHash } from "../lib/toyyibpayClient";
 import { toyyibpayCredentialKeysSchema } from "../lib/toyyibpayCredentialKeysSchema";
 import { toyyibpayPaymentDataSchema } from "../lib/toyyibpayPaymentDataSchema";
 
 const log = logger.getSubLogger({ prefix: ["toyyibpay:webhook"] });
+
+async function readRawBody(req: NextApiRequest): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : (chunk as Buffer));
+  }
+  return Buffer.concat(chunks).toString("utf-8");
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// The callback arrives as multipart/form-data, so the body must stay unparsed for us to decode it.
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
 
 /**
  * ToyyibPay `billCallbackUrl` handler (server-to-server POST).
@@ -27,7 +47,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       throw new HttpError({ statusCode: 405, message: "Method Not Allowed" });
     }
 
-    const body = (req.body ?? {}) as Record<string, unknown>;
+    const contentType = String(req.headers["content-type"] ?? "");
+    const rawBody = await readRawBody(req);
+    const parsedBody = parseCallbackBody(rawBody, contentType);
+    // Merge so the handler also works if something upstream already parsed the body.
+    const body: Record<string, unknown> = { ...(isPlainObject(req.body) ? req.body : {}), ...parsedBody };
     const asString = (value: unknown) => (value === undefined || value === null ? "" : String(value));
 
     const refno = asString(body.refno);
@@ -38,6 +62,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const hash = asString(body.hash);
 
     if (!orderId && !billCode) {
+      log.error(
+        `ToyyibPay callback without order_id/billcode (content-type="${contentType}", fields=[${Object.keys(
+          body
+        ).join(",")}], rawLength=${rawBody.length})`
+      );
       throw new HttpError({ statusCode: 400, message: "Missing order_id/billcode" });
     }
     if (!hash) {

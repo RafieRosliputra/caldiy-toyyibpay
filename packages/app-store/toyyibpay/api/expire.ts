@@ -79,7 +79,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         : parsedKeys.data.prod
       : undefined;
 
+    // A bill may only be expired once ToyyibPay has positively told us it is unpaid: if the check fails we
+    // must keep the booking alive, otherwise a customer who already paid would lose their slot.
+    let verifiedUnpaidBill = false;
+    let verifiedSecretKey: string | undefined;
+
     if (account?.secretKey) {
+      verifiedSecretKey = account.secretKey;
       try {
         const transactions = await getToyyibpayBillTransactions({
           billCode: payment.externalId,
@@ -99,19 +105,36 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           recovered++;
           continue;
         }
-      } catch (error) {
-        log.warn(`Could not check ToyyibPay bill ${payment.externalId}: ${safeStringify(error)}`);
-      }
 
-      try {
-        await deactivateToyyibpayBill({
-          secretKey: account.secretKey,
-          billCode: payment.externalId,
-          isSandbox,
-        });
+        verifiedUnpaidBill = true;
       } catch (error) {
-        log.warn(`Could not deactivate ToyyibPay bill ${payment.externalId}: ${safeStringify(error)}`);
+        log.error(
+          `Could not verify ToyyibPay bill ${payment.externalId} for booking ${payment.bookingId}: ${safeStringify(
+            error
+          )}`
+        );
       }
+    } else {
+      log.error(
+        `No ToyyibPay credentials available to verify bill ${payment.externalId} for booking ${payment.bookingId}`
+      );
+    }
+
+    if (!verifiedUnpaidBill || !verifiedSecretKey) {
+      log.error(
+        `Skipping expiration of booking ${payment.bookingId}: bill ${payment.externalId} could not be verified as unpaid (will retry on the next run)`
+      );
+      continue;
+    }
+
+    try {
+      await deactivateToyyibpayBill({
+        secretKey: verifiedSecretKey,
+        billCode: payment.externalId,
+        isSandbox,
+      });
+    } catch (error) {
+      log.warn(`Could not deactivate ToyyibPay bill ${payment.externalId}: ${safeStringify(error)}`);
     }
 
     await prisma.booking.update({
