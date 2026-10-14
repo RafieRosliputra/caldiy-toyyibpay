@@ -34,7 +34,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     });
 
     if (!category) {
-      return res.status(400).json({ message: "ToyyibPay category not found for this secret key" });
+      return res.status(400).json({
+        message:
+          "ToyyibPay did not return category details for this secret key. Check the secret key and category code (and that they belong to the same environment: live vs dev.toyyibpay.com).",
+      });
+    }
+
+    if (category.categoryStatus === "0") {
+      return res.status(400).json({ message: `ToyyibPay category "${category.categoryName}" is inactive` });
     }
 
     const duitNowActivated = credentials.enableDuitNowQR
@@ -43,6 +50,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           isSandbox: credentials.isSandbox,
         })
       : undefined;
+
+    if (credentials.enableDuitNowQR && duitNowActivated === false) {
+      return res.status(400).json({
+        message:
+          "DuitNow QR is not activated on this ToyyibPay account. Uncheck DuitNow QR, or ask ToyyibPay to activate it first (bills would fail otherwise).",
+      });
+    }
 
     return res.status(200).json({
       categoryName: category.categoryName,

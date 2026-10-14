@@ -33,19 +33,12 @@ export interface CreateToyyibpayBillInput {
   billChargeToCustomer?: boolean;
 }
 
-interface ToyyibpayBillTransaction {
-  billName?: string;
-  billDescription?: string;
-  billTo?: string;
-  billEmail?: string;
-  billPhone?: string;
-  billStatus?: string;
+export interface ToyyibpayBillTransaction {
   billpaymentStatus?: string;
   billpaymentChannel?: string;
   billpaymentAmount?: string;
   billpaymentInvoiceNo?: string;
   billExternalReferenceNo?: string;
-  billPaymentDate?: string;
 }
 
 export function getToyyibpayBaseUrl(isSandbox: boolean): string {
@@ -179,6 +172,34 @@ function parseToyyibpayResponse<T>(endpoint: string, body: string): T {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * ToyyibPay is inconsistent about response shapes: the docs show arrays (`[{...}]`) while the live API
+ * sometimes returns a bare object (`{...}`). This picks the first usable object from either shape.
+ */
+function firstRecord(parsed: unknown): Record<string, unknown> | null {
+  if (Array.isArray(parsed)) {
+    const first = parsed.find((entry) => isRecord(entry));
+    return isRecord(first) ? first : null;
+  }
+  return isRecord(parsed) ? parsed : null;
+}
+
+/** Field names also vary in casing (`BillCode` vs `billcode`, `CategoryName` vs `categoryName`). */
+function pickField(source: Record<string, unknown>, fieldName: string): string | undefined {
+  const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const target = normalize(fieldName);
+  for (const [key, value] of Object.entries(source)) {
+    if (normalize(key) !== target) continue;
+    if (value === null || value === undefined) return undefined;
+    return String(value);
+  }
+  return undefined;
+}
+
 export async function createToyyibpayBill({
   account,
   billName,
@@ -229,8 +250,9 @@ export async function createToyyibpayBill({
   }
 
   const body = await callToyyibpayApi(baseUrl, "/index.php/api/createBill", data);
-  const parsed = parseToyyibpayResponse<Array<{ BillCode?: string }>>("/index.php/api/createBill", body);
-  const billCode = Array.isArray(parsed) ? parsed[0]?.BillCode : undefined;
+  const parsed = parseToyyibpayResponse<unknown>("/index.php/api/createBill", body);
+  const record = firstRecord(parsed);
+  const billCode = record ? pickField(record, "BillCode") : undefined;
 
   if (!billCode) {
     throw new ErrorWithCode(
@@ -256,11 +278,17 @@ export async function getToyyibpayCategoryDetails({
     userSecretKey: secretKey,
     categoryCode,
   });
-  const parsed = parseToyyibpayResponse<Array<{ categoryName?: string; categoryStatus?: string }>>(
-    "/index.php/api/getCategoryDetails",
-    body
-  );
-  return Array.isArray(parsed) ? (parsed[0] ?? null) : null;
+  const parsed = parseToyyibpayResponse<unknown>("/index.php/api/getCategoryDetails", body);
+  const record = firstRecord(parsed);
+
+  if (!record) return null;
+
+  const categoryName = pickField(record, "categoryName");
+  const categoryStatus = pickField(record, "categoryStatus");
+
+  if (!categoryName && categoryStatus === undefined) return null;
+
+  return { categoryName, categoryStatus };
 }
 
 export async function getToyyibpayBillTransactions({
@@ -272,7 +300,17 @@ export async function getToyyibpayBillTransactions({
 }): Promise<ToyyibpayBillTransaction[]> {
   const baseUrl = getToyyibpayBaseUrl(isSandbox);
   const body = await callToyyibpayApi(baseUrl, "/index.php/api/getBillTransactions", { billCode });
-  return parseToyyibpayResponse<ToyyibpayBillTransaction[]>("/index.php/api/getBillTransactions", body);
+  const parsed = parseToyyibpayResponse<unknown>("/index.php/api/getBillTransactions", body);
+  const records = Array.isArray(parsed) ? parsed.filter(isRecord) : isRecord(parsed) ? [parsed] : [];
+
+  // Normalise the field casing once here so callers can rely on `billpaymentStatus` etc.
+  return records.map((record) => ({
+    billpaymentStatus: pickField(record, "billpaymentStatus"),
+    billpaymentChannel: pickField(record, "billpaymentChannel"),
+    billpaymentAmount: pickField(record, "billpaymentAmount"),
+    billpaymentInvoiceNo: pickField(record, "billpaymentInvoiceNo"),
+    billExternalReferenceNo: pickField(record, "billExternalReferenceNo"),
+  }));
 }
 
 export async function deactivateToyyibpayBill({
@@ -286,7 +324,21 @@ export async function deactivateToyyibpayBill({
 }): Promise<{ status: string; result: string }> {
   const baseUrl = getToyyibpayBaseUrl(isSandbox);
   const body = await callToyyibpayApi(baseUrl, "/index.php/api/inactiveBill", { secretKey, billCode });
-  return parseToyyibpayResponse<{ status: string; result: string }>("/index.php/api/inactiveBill", body);
+
+  try {
+    const parsed = parseToyyibpayResponse<unknown>("/index.php/api/inactiveBill", body);
+    const record = firstRecord(parsed);
+    return {
+      status: (record && pickField(record, "status")) ?? "unknown",
+      result: (record && pickField(record, "result")) ?? body.trim(),
+    };
+  } catch (error) {
+    // Some responses are plain text, e.g. "Bill has pending transaction process"
+    return {
+      status: "unknown",
+      result: body.trim() || (error instanceof Error ? error.message : "unknown"),
+    };
+  }
 }
 
 export async function isToyyibpayDuitNowQRActivated({
