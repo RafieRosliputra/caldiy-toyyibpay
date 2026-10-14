@@ -8,6 +8,7 @@ import type { Prisma } from "@calcom/prisma/client";
 import type { NextApiRequest, NextApiResponse } from "next";
 import appConfig from "../config.json";
 import { getPaymentHoldMinutes } from "../lib/constants";
+import { isPaymentSuccessSignal } from "../lib/isPaymentSuccessSignal";
 import { deactivateToyyibpayBill, getToyyibpayBillTransactions } from "../lib/toyyibpayClient";
 import { toyyibpayCredentialKeysSchema } from "../lib/toyyibpayCredentialKeysSchema";
 import { toyyibpayPaymentDataSchema } from "../lib/toyyibpayPaymentDataSchema";
@@ -94,14 +95,28 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
         if (transactions.some((transaction) => transaction.billpaymentStatus === "1")) {
           log.info(`ToyyibPay payment ${payment.id} was paid but not confirmed, confirming it now`);
-          await handlePaymentSuccess({
-            paymentId: payment.id,
-            bookingId: payment.bookingId,
-            appSlug: appConfig.slug,
-            traceContext: distributedTracing.createTrace("toyyibpay_expire_recovery", {
-              meta: { paymentId: payment.id, bookingId: payment.bookingId },
-            }),
-          });
+
+          try {
+            await handlePaymentSuccess({
+              paymentId: payment.id,
+              bookingId: payment.bookingId,
+              appSlug: appConfig.slug,
+              traceContext: distributedTracing.createTrace("toyyibpay_expire_recovery", {
+                meta: { paymentId: payment.id, bookingId: payment.bookingId },
+              }),
+            });
+          } catch (error) {
+            // handlePaymentSuccess reports success by throwing an HttpError with statusCode 200.
+            if (!isPaymentSuccessSignal(error)) {
+              log.error(
+                `Recovering payment ${payment.id} failed: ${safeStringify(
+                  error
+                )} - leaving booking ${payment.bookingId} untouched for the next run`
+              );
+              continue;
+            }
+          }
+
           recovered++;
           continue;
         }
